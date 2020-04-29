@@ -6,11 +6,12 @@ from config import *
 from scipy.optimize import minimize
 
 class Shot():
-    def __init__(self, start, length, heat_table):
+    def __init__(self, start, length, heat_table, table_type):
         self.start = start  # starting frame index, inclusive
         self.end = start + length  # ending frame index, inclusive
         self.length = length
         self.frame_count = SAMPLE_RATE * length
+        self.tt = table_type
 
         #max_params = find_max_heat(heat_table, start)
         cost, cost_h, cost_fov, cost_v, cost_l, x = self.optimizeSegment(heat_table)
@@ -30,7 +31,7 @@ class Shot():
         lb = np.array([-2 * np.pi, -np.pi/2, -2 * np.pi, -np.pi/2, MIN_FOV, MIN_FOV])
         ub = np.array([2 * np.pi, np.pi/2, 2 * np.pi, np.pi/2, MAX_FOV, MAX_FOV])
         def obj_func(x):
-            return costShot(heat_table, self.start, x[0:2], x[4], self.end, x[2:4], x[5])[0]
+            return costShot(heat_table, self.tt, self.start, x[0:2], x[4], self.end, x[2:4], x[5])[0]
 
         cost = 10000000
         final_x = np.zeros(6)
@@ -40,7 +41,7 @@ class Shot():
             result = minimize(obj_func, x0=x0, bounds = np.vstack((lb, ub)).T)
 
             x = result.x
-            new_cost, new_cost_h, new_cost_fov, new_cost_v, new_cost_l = costShot(heat_table, self.start, x[0:2], x[4], self.end, x[2:4], x[5])
+            new_cost, new_cost_h, new_cost_fov, new_cost_v, new_cost_l = costShot(heat_table, self.tt, self.start, x[0:2], x[4], self.end, x[2:4], x[5])
             if new_cost < cost:
                 cost = new_cost
                 cost_h = new_cost_h
@@ -77,7 +78,7 @@ class Shot():
         #print(path.shape)
         return ans, path
 
-def costShot(heat_table, start, start_pos, start_fov, end, end_pos, end_fov):
+def costShot(heat_table, tt, start, start_pos, start_fov, end, end_pos, end_fov):
     num = end - start
     pos = np.zeros((num, 2))
     pos[0] = start_pos
@@ -99,8 +100,8 @@ def costShot(heat_table, start, start_pos, start_fov, end, end_pos, end_fov):
         pos1[i, 0] = FixLon(pos[0, 0] + delta1 * i / (num-1))
         pos2[i, 0] = FixLon(pos[0, 0] + delta2 * i / (num-1))
     
-    cost1, cost1_h, cost1_fov, cost1_v, cost1_l = costLine(heat_table, start, pos1, fov)
-    cost2, cost2_h, cost2_fov, cost2_v, cost2_l = costLine(heat_table, start, pos2, fov)
+    cost1, cost1_h, cost1_fov, cost1_v, cost1_l = costLine(heat_table, tt, start, pos1, fov)
+    cost2, cost2_h, cost2_fov, cost2_v, cost2_l = costLine(heat_table, tt, start, pos2, fov)
     
     if cost1 < cost2:
         pos = pos1
@@ -122,23 +123,26 @@ def costShot(heat_table, start, start_pos, start_fov, end, end_pos, end_fov):
 def FixLon(x):
     return np.mod(x + np.pi, 2 * np.pi) - np.pi
 
-def costLine(heat_table, start, pos_path, fov):
+def costLine(heat_table, tt, start, pos_path, fov):
     cost_h = []
     cost = 0
     num = pos_path.shape[0]
     for i in range(num):
-        heat = - 8 * interpolate(heat_table, start + i, fov[i], pos_path[i, 0], pos_path[i, 1])
+        heat = - 100 * interpolate(heat_table, start + i, fov[i], pos_path[i, 0], pos_path[i, 1])
         cost = cost + heat
         cost_h.append(heat)
 
     cost_h = np.array(cost_h)
 
     cost_v = []
-    for i in range(num - 1):
-        dist = np.linalg.norm(pos_path[i+1] - pos_path[i])
-        cost_v.append(0.1 * dist**2)
-    cost_v.append(cost_v[-1])
-    cost += np.mean(cost_v)
+    dist = np.linalg.norm(pos_path[1] - pos_path[0])
+    if dist > np.pi/12:
+        for i in range(num):
+            cost_v.append(0.1 * dist**2)
+        cost += np.mean(cost_v)
+    else:
+        for i in range(num):
+            cost_v.append(0)
 
     cost_l = 0
     if num < 3:
@@ -148,8 +152,12 @@ def costLine(heat_table, start, pos_path, fov):
     cost += cost_l
     cost_l = np.repeat(cost_l/num, num)
 
-    cost_fov = 0.1 * (fov - 1.5) * (fov - 1.5)
-    cost += np.sum(cost_fov)  
+    if tt == REGULAR:
+        cost_fov = 0.1 * (fov - 1.5) * (fov - 1.5)
+        cost += np.sum(cost_fov)  
+    else:
+        cost_fov = np.zeros(len(fov))
+
     return cost, cost_h, cost_fov, cost_v, cost_l
 
 def costCut(last_shot, this_shot):

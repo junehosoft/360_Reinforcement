@@ -2,7 +2,7 @@ import numpy as np
 from config import *
 from shot import *
 
-def solveByMerge(heat_table, params):
+def solveByMerge(heat_table, table_type):
     segments = []
     init_segment_length = INIT_SHOT_LENGTH
     num_segment = int(np.floor(heat_table.shape[0] / init_segment_length))
@@ -13,12 +13,12 @@ def solveByMerge(heat_table, params):
     opt_cost_heat = 0
     opt_cost_trans = 0
     for i in range(num_segment-1):
-        S = Shot(i * init_segment_length, init_segment_length, heat_table)
+        S = Shot(i * init_segment_length, init_segment_length, heat_table, table_type)
         segments.append(S)
         opt_cost_heat += S.cost
         if i > 0:
             cut_cost, cut_type = costCut(segments[i-1], S)
-            print(cut_cost)
+            # print(cut_cost)
             opt_cost_trans += cut_cost
     opt_cost = opt_cost_heat + opt_cost_trans
     cost_heat_by_iter.append(opt_cost_heat)
@@ -40,7 +40,7 @@ def solveByMerge(heat_table, params):
         min_cost_trans = 0
         opt_S = segments[0]
         for i in range(len(segments)-1):
-            new_S = Shot(segments[i].start, segments[i].length + segments[i+1].length, heat_table)
+            new_S = Shot(segments[i].start, segments[i].length + segments[i+1].length, heat_table, table_type)
             delta_cost_heat = new_S.cost - (segments[i].cost + segments[i+1].cost)
             #print(i)
             #print(delta_cost_heat)

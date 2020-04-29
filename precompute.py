@@ -48,7 +48,17 @@ def precompute(data, fname, shot_length, params, write_masks = False):
                     heat_table[s, i, j, k] = np.array([heat, params[0, i, j, k], params[1, i, j, k], params[2, i, j, k]])
     
     return heat_table
-        
+
+def normalize_table(heat_table):
+    print('normalizing table')
+    length = heat_table.shape[0]
+    for s in range(length):
+        #print(s)
+        for f in range(heat_table.shape[1]):
+            heat_table[s, f, :, :] = heat_table[s, f, :, :] / np.amax(heat_table[s, f, :, :])
+
+    return heat_table
+
 
 if __name__ == '__main__':
     params = get_params(np.pi / 4, np.pi * 3 / 4, 5, 5, 5)

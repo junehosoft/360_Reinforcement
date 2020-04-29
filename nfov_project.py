@@ -11,7 +11,7 @@ from load import load_ground_truths, read_npy, write_npy
 from frame import FrameGT
 from shot import Shot
 from nfov_util import get_nfov_img
-from precompute import get_params, precompute
+from precompute import get_params, precompute, normalize_table
 from config import *
 from merge import *
 
@@ -54,11 +54,13 @@ if __name__ == '__main__':
     parser.add_argument("file_name", type=str)
     parser.add_argument("optimization", type=str)
     parser.add_argument("--length", type=int, default=150)
+    parser.add_argument("--table", type=int, default=REGULAR)
     opt = parser.parse_args()
 
     file_name = opt.file_name
     optimization = opt.optimization
     length = opt.length
+    table_type = opt.table
 
     if os.path.exists('{}.npy'.format(file_name)):
         data = read_npy(file_name)
@@ -75,14 +77,25 @@ if __name__ == '__main__':
         params = get_params(MIN_FOV, MAX_FOV, NUM_FOV, NUM_H, NUM_V)
         np.save(params_file_name, params)
     t2 = time.time()
-
+    print(params.shape)
     print("Got params")
-    table_file_name = "{}_table_{}_{}_{}_{}.npy".format(file_name, SAMPLE_RATE, NUM_FOV, NUM_H, NUM_V)
+    table_file_name = "{}_table_{}_{}_{}_{}_{}.npy".format(file_name, table_type, SAMPLE_RATE, NUM_FOV, NUM_H, NUM_V)
     if os.path.exists(table_file_name):
         heat_table = np.load(table_file_name)
-    else:
+    elif table_type == 0:
         heat_table = precompute(data, file_name, SAMPLE_RATE, params, write_masks=True)
+        np.save(file_name, heat_table)
+    elif table_type == 1:
+        temp_name = "{}_table_{}_{}_{}_{}_{}.npy".format(file_name, REGULAR, SAMPLE_RATE, NUM_FOV, NUM_H, NUM_V)
+        if os.path.exists(temp_name):
+            print("triggered")
+            heat_table = np.load(temp_name)
+        else:
+            heat_table = precompute(data, file_name, SAMPLE_RATE, params, write_masks=True)
+            np.save(temp_name, heat_table)
+        heat_table = normalize_table(heat_table)
         np.save(table_file_name, heat_table)
+    
     t3 = time.time()
 
     print("Parameter time: {}".format(t2 - t1))
@@ -95,13 +108,13 @@ if __name__ == '__main__':
     width = 960
     height = int(width/ASPECT_RATIO)
     
-    params_str = "_".join(str(x) for x in [file_name, optimization, length, SAMPLE_RATE, NUM_FOV, NUM_H, NUM_V, INIT_SHOT_LENGTH])
+    params_str = "_".join(str(x) for x in [file_name, optimization, table_type, length, SAMPLE_RATE, NUM_FOV, NUM_H, NUM_V, INIT_SHOT_LENGTH])
     vid_writer = cv2.VideoWriter('out/{}.avi'.format(params_str),cv2.VideoWriter_fourcc(*'DIVX'), 30, (width, height))
     t4 = time.time()
 
     #shot_list = compile_shots(data, int(length / shot_len), shot_len, heat_table)
     if optimization == "merge":
-        shot_list, cost_heat_by_iter, cost_trans_by_iter = solveByMerge(heat_table[:int(length/SAMPLE_RATE)], params)
+        shot_list, cost_heat_by_iter, cost_trans_by_iter = solveByMerge(heat_table[:int(length/SAMPLE_RATE)], table_type)
     else:
         print("incorrect optimization")
     
