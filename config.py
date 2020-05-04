@@ -11,4 +11,9 @@ PAN = 1
 CUT = 2
 
 REGULAR = 0
-NORMAL = 1
+NORMAL = 1  
+
+MERGE = 0
+PYRAMID = 1
+
+SPLINE = True

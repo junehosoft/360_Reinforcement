@@ -6,20 +6,27 @@ from config import *
 from scipy.optimize import minimize
 
 class Shot():
-    def __init__(self, start, length, heat_table, table_type):
+    def __init__(self, start, length, heat_table, table_type, opt=MERGE, s=[-1,-1,-1], e=[-1,-1,-1]):
         self.start = start  # starting frame index, inclusive
-        self.end = start + length  # ending frame index, inclusive
+        self.end = start + length  # ending frame index, exclusive
         self.length = length
         self.frame_count = SAMPLE_RATE * length
         self.tt = table_type
 
         #max_params = find_max_heat(heat_table, start)
-        cost, cost_h, cost_fov, cost_v, cost_l, x = self.optimizeSegment(heat_table)
-        #self.heat = max_params[0]
-        self.start_pos = x[0:2]
-        self.start_fov = x[4]
-        self.end_pos = x[2:4]
-        self.end_fov = x[5]
+        if opt == MERGE:
+            cost, cost_h, cost_fov, cost_v, cost_l, x = self.optimizeSegment(heat_table)
+            self.start_pos = x[0:2]
+            self.start_fov = x[4]
+            self.end_pos = x[2:4]
+            self.end_fov = x[5]
+        else:
+            self.start_pos = s[0:2]
+            self.start_fov = s[2]
+            self.end_pos = e[0:2]
+            self.end_fov = e[2]
+            cost, cost_h, cost_fov, cost_v, cost_l = costShot(heat_table, self.tt, self.start, self.start_pos, self.start_fov, self.end, self.end_pos, self.end_fov)
+        
         self.shotType = STATIC
         self.cost = cost
         self.cost_h = cost_h
@@ -28,8 +35,8 @@ class Shot():
         self.cost_l = cost_l
 
     def optimizeSegment(self, heat_table):
-        lb = np.array([-2 * np.pi, -np.pi/2, -2 * np.pi, -np.pi/2, MIN_FOV, MIN_FOV])
-        ub = np.array([2 * np.pi, np.pi/2, 2 * np.pi, np.pi/2, MAX_FOV, MAX_FOV])
+        lb = np.array([-np.pi, -np.pi/2,  -np.pi, -np.pi/2, MIN_FOV, MIN_FOV])
+        ub = np.array([ np.pi, np.pi/2, np.pi, np.pi/2, MAX_FOV, MAX_FOV])
         def obj_func(x):
             return costShot(heat_table, self.tt, self.start, x[0:2], x[4], self.end, x[2:4], x[5])[0]
 
@@ -56,14 +63,40 @@ class Shot():
         #nfov_img, par_set = get_nfov_img(width, height, self.anchor[0], self.anchor[1], self.anchor[2], img)
 
         #return nfov_img, par_set
-    
+    def gen_path(self, num):
+        delta = self.end_pos - self.start_pos
+        if delta[0] > 0:
+            delta2 = delta[0] - 2 * np.pi
+        else:
+            delta2 = delta[0] + 2 * np.pi
+        if abs(delta2) < abs(delta[0]):
+            delta[0] = delta2
+        delta_pos = delta / (num-1)
+        delta_fov = (self.end_fov - self.start_fov) / (num - 1)
+        path = []
+        pos = self.start_pos
+        fov = self.start_fov
+        for i in range(num):
+            path.append([pos[0], pos[1], fov])
+            pos += delta_pos
+            fov += delta_fov
+        path = np.array(path)
+        #print(path.shape)
+        return path
+
     def apply_to_imgs(self, imgs, width, height):
         assert self.frame_count == len(imgs)
-
         #nfov_img, par_set = get_nfov_img(width, height, self.anchor[0], self.anchor[1], self.anchor[2], imgs[0])
 
         ans = []
-        delta_pos = (self.end_pos - self.start_pos) / (len(imgs) - 1)
+        delta = self.end_pos - self.start_pos
+        if delta[0] > 0:
+            delta2 = delta[0] - 2 * np.pi
+        else:
+            delta2 = delta[0] + 2 * np.pi
+        if abs(delta2) < abs(delta[0]):
+            delta[0] = delta2
+        delta_pos = delta / (len(imgs) - 1)
         delta_fov = (self.end_fov - self.start_fov) / (len(imgs) - 1)
         path = []
         pos = self.start_pos
@@ -77,6 +110,15 @@ class Shot():
         path = np.array(path)
         #print(path.shape)
         return ans, path
+
+    def get_next(self):
+        if self.length > 1:
+            delta_pos = (self.end_pos - self.start_pos) / (self.length - 1)
+            delta_fov = (self.end_fov - self.start_fov) / (self.length - 1)
+        else:
+            delta_pos = 0
+            delta_fov = 0
+        return self.end_pos + delta_pos, self.end_fov + delta_fov
 
 def costShot(heat_table, tt, start, start_pos, start_fov, end, end_pos, end_fov):
     num = end - start
@@ -124,21 +166,25 @@ def FixLon(x):
     return np.mod(x + np.pi, 2 * np.pi) - np.pi
 
 def costLine(heat_table, tt, start, pos_path, fov):
+    #print(pos_path)
     cost_h = []
     cost = 0
     num = pos_path.shape[0]
     for i in range(num):
-        heat = - 100 * interpolate(heat_table, start + i, fov[i], pos_path[i, 0], pos_path[i, 1])
+        heat = - 10 * interpolate(heat_table, start + i, fov[i], pos_path[i, 0], pos_path[i, 1])
         cost = cost + heat
         cost_h.append(heat)
 
     cost_h = np.array(cost_h)
 
     cost_v = []
-    dist = np.linalg.norm(pos_path[1] - pos_path[0])
+    if pos_path.shape[0] > 1:
+        dist = np.linalg.norm(pos_path[1] - pos_path[0])
+    else:
+        dist = 0
     if dist > np.pi/12:
         for i in range(num):
-            cost_v.append(0.1 * dist**2)
+            cost_v.append(10 * dist**2)
         cost += np.mean(cost_v)
     else:
         for i in range(num):
@@ -153,7 +199,7 @@ def costLine(heat_table, tt, start, pos_path, fov):
     cost_l = np.repeat(cost_l/num, num)
 
     if tt == REGULAR:
-        cost_fov = 0.1 * (fov - 1.5) * (fov - 1.5)
+        cost_fov = 0.1 * (fov - 1.7) * (fov - 1.7)
         cost += np.sum(cost_fov)  
     else:
         cost_fov = np.zeros(len(fov))
@@ -161,7 +207,8 @@ def costLine(heat_table, tt, start, pos_path, fov):
     return cost, cost_h, cost_fov, cost_v, cost_l
 
 def costCut(last_shot, this_shot):
-    cut_const = 100
+    # return 0, 0
+    cut_const = 10
     eps = np.pi / 6
     f_cut = 0
     cut_type = -1
@@ -185,15 +232,15 @@ def costCut(last_shot, this_shot):
     latdist = this_shot.start_pos[1] - last_shot.end_pos[1]
     a = np.sqrt(londist**2 + latdist**2)
     if a > eps:
-        f_cut = eps/a * cut_const
+        f_cut = 1
         cut_type = 0
-    elif abs(last_shot.end_fov - this_shot.start_fov) > 0.1:
-        f_cut = 10000 * (last_shot.end_fov - this_shot.start_fov)**2
+    elif abs(last_shot.end_fov - this_shot.start_fov) > 0.3:
+        f_cut = 1000 * (last_shot.end_fov - this_shot.start_fov)**2
         cut_type = -1
     else:
         cut_angle = (- np.dot(vec_trans, vec_last) - np.dot(vec_trans, vec_this)) / 2
         if cut_angle > 0:
-            f_cut = a/eps * cut_const * cut_angle**2
+            f_cut = a/eps * cut_angle**2
         else:
             f_cut = 0
     return f_cut, cut_type

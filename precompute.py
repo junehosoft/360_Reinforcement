@@ -50,13 +50,10 @@ def precompute(data, fname, shot_length, params, write_masks = False):
     return heat_table
 
 def normalize_table(heat_table):
-    print('normalizing table')
     length = heat_table.shape[0]
     for s in range(length):
-        #print(s)
         for f in range(heat_table.shape[1]):
             heat_table[s, f, :, :] = heat_table[s, f, :, :] / np.amax(heat_table[s, f, :, :])
-
     return heat_table
 
 
